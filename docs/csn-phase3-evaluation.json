@@ -1,0 +1,28 @@
+{
+  "benchmark": "CodeSearchNet Python Human Judgments",
+  "total_queries": 86,
+  "bm25_baseline": {
+    "development": {
+      "queries": 60,
+      "mean_ndcg_at_10": 0.7847877168128367
+    },
+    "test": {
+      "queries": 26,
+      "mean_ndcg_at_10": 0.7652044078976298
+    }
+  },
+  "model_evaluation": {
+    "checkpoint": "/content/jev-workspace/runs/jev-phase3-a100",
+    "mode": "score",
+    "results": {
+      "development": {
+        "queries": 60,
+        "mean_ndcg_at_10": 0.826756869029905
+      },
+      "test": {
+        "queries": 26,
+        "mean_ndcg_at_10": 0.8676872663141896
+      }
+    }
+  }
+}

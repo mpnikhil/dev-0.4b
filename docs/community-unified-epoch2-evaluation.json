@@ -1,0 +1,36 @@
+{
+  "model": "ModernBERT-large (399M)",
+  "checkpoint": "runs/jev-unified-epoch2",
+  "device": "mps",
+  "timestamp": "2026-09-20 01:29:51 UTC",
+  "benchmarks": {
+    "boolq": {
+      "dataset": "google/boolq (validation)",
+      "task": "Noul (Boolean Decision)",
+      "sample_count": 500,
+      "accuracy": 0.852,
+      "brier_score": 0.12325211639574137,
+      "ece_10_bins": 0.10330099180073016,
+      "time_seconds": 21.70524501800537
+    },
+    "banking77": {
+      "dataset": "mteb/banking77 (test)",
+      "task": "Choice (77-way Routing)",
+      "num_classes": 77,
+      "sample_count": 300,
+      "top1_accuracy": 0.9133333333333333,
+      "top3_recall": 0.9866666666666667,
+      "ece_10_bins": 0.07536173522472377,
+      "time_seconds": 27.66497778892517
+    },
+    "yelp": {
+      "dataset": "Yelp/yelp_review_full (test)",
+      "task": "Score (5-level Ordinal Rating)",
+      "sample_count": 300,
+      "exact_accuracy": 0.6266666666666667,
+      "mean_absolute_error": 0.40169393599589,
+      "ece_10_bins": 0.31777407815059017,
+      "time_seconds": 15.038855791091919
+    }
+  }
+}

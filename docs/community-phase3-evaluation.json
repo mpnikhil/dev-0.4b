@@ -1,0 +1,36 @@
+{
+  "model": "ModernBERT-large (399M)",
+  "checkpoint": "runs/jev-phase3-a100",
+  "device": "mps",
+  "timestamp": "2026-09-19 17:30:19 UTC",
+  "benchmarks": {
+    "boolq": {
+      "dataset": "google/boolq (validation)",
+      "task": "Noul (Boolean Decision)",
+      "sample_count": 300,
+      "accuracy": 0.81,
+      "brier_score": 0.174548866990179,
+      "ece_10_bins": 0.17208894798704324,
+      "time_seconds": 13.2606782913208
+    },
+    "banking77": {
+      "dataset": "mteb/banking77 (test)",
+      "task": "Choice (77-way Routing)",
+      "num_classes": 77,
+      "sample_count": 300,
+      "top1_accuracy": 0.9233333333333333,
+      "top3_recall": 0.99,
+      "ece_10_bins": 0.059928418397903395,
+      "time_seconds": 27.133360862731934
+    },
+    "yelp": {
+      "dataset": "Yelp/yelp_review_full (test)",
+      "task": "Score (5-level Ordinal Rating)",
+      "sample_count": 300,
+      "exact_accuracy": 0.6333333333333333,
+      "mean_absolute_error": 0.42639734602912843,
+      "ece_10_bins": 0.12359992633263267,
+      "time_seconds": 14.733767032623291
+    }
+  }
+}

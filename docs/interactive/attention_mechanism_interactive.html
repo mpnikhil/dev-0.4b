@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Attention Mechanism Intuition: Causal vs Bidirectional</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    @keyframes pulse-glow {
+      0%, 100% { opacity: 0.3; stroke-width: 1.5px; }
+      50% { opacity: 0.9; stroke-width: 2.5px; }
+    }
+    .arc-glow { animation: pulse-glow 2s infinite ease-in-out; }
+  </style>
+</head>
+<body class="bg-transparent text-[var(--foreground)] antialiased p-4">
+  <div class="bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] rounded-2xl p-6 shadow-lg max-w-4xl mx-auto backdrop-blur-md">
+    
+    <!-- Header & Mode Switcher -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 pb-4 border-b border-[var(--border)]">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+            Interactive Intuition
+          </span>
+          <h2 class="text-xl font-bold tracking-tight">How the Model "Reads" Your Options</h2>
+        </div>
+        <p class="text-sm text-[var(--muted-foreground)] mt-1">
+          Click tokens to inspect attention paths, or toggle architectures to see why bidirectional attention eliminates the blind spot.
+        </p>
+      </div>
+
+      <div class="flex items-center bg-[var(--background)] p-1 rounded-xl border border-[var(--border)] self-stretch sm:self-auto">
+        <button id="btn-causal" onclick="setMode('causal')" class="flex-1 sm:flex-initial px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-200 text-[var(--muted-foreground)] hover:text-[var(--foreground)]">
+          Causal Decoder
+        </button>
+        <button id="btn-bidi" onclick="setMode('bidi')" class="flex-1 sm:flex-initial px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-200 bg-cyan-500 text-black shadow-sm font-bold">
+          Bidirectional (Dev / ModernBERT)
+        </button>
+      </div>
+    </div>
+
+    <!-- Status Banner / Insight Box -->
+    <div id="insight-box" class="mb-6 p-4 rounded-xl border transition-all duration-300 bg-cyan-500/5 border-cyan-500/20">
+      <div class="flex items-start gap-3">
+        <div id="status-icon" class="w-6 h-6 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0 mt-0.5 font-bold">✓</div>
+        <div>
+          <h4 id="insight-title" class="text-sm font-semibold text-cyan-400">Bidirectional Cross-Attention (Dev-0.4B)</h4>
+          <p id="insight-desc" class="text-xs text-[var(--muted-foreground)] mt-0.5 leading-relaxed">
+            Every token in the unstructured log attends to all candidate choices across all 28 layers. The error code <code class="text-cyan-300 bg-cyan-950/40 px-1 py-0.5 rounded">550 Mailbox</code> directly illuminates and connects to <code class="text-cyan-300 bg-cyan-950/40 px-1 py-0.5 rounded">email_infrastructure</code> with zero blinders.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Interactive Stage / Visualization -->
+    <div class="relative bg-[var(--background)] rounded-xl border border-[var(--border)] p-6 min-h-[320px] flex flex-col justify-between overflow-hidden">
+      
+      <!-- Top Layer: SVG Attention Arcs -->
+      <svg id="attention-svg" class="absolute inset-0 w-full h-full pointer-events-none z-10"></svg>
+
+      <!-- Section: Unstructured Input Document -->
+      <div>
+        <div class="flex justify-between items-center mb-3">
+          <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)] flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-blue-500"></span> Unstructured State / Log (Context)
+          </span>
+          <span class="text-xs text-[var(--muted-foreground)]" id="click-hint">Click a token below to trace its attention</span>
+        </div>
+        <div id="context-tokens" class="flex flex-wrap gap-2 relative z-20"></div>
+      </div>
+
+      <!-- Divider / Attention Flow Indicator -->
+      <div class="my-6 relative flex items-center justify-center">
+        <div class="w-full border-t border-[var(--border)]"></div>
+        <div id="attention-direction-badge" class="absolute px-3 py-1 rounded-full text-xs font-mono font-medium border bg-[var(--card)] shadow-sm">
+          ⇄ 28 Layers of Full Two-Way Cross-Attention
+        </div>
+      </div>
+
+      <!-- Section: Candidate Options -->
+      <div>
+        <div class="flex justify-between items-center mb-3">
+          <span class="text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)] flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-cyan-400"></span> Dynamic Candidate Choices (Criteria Spans)
+          </span>
+          <span class="text-xs text-cyan-400 font-mono" id="score-readout">Winning Fit: email_infrastructure (99.87%)</span>
+        </div>
+        <div id="candidate-tokens" class="flex flex-wrap gap-3 relative z-20"></div>
+      </div>
+
+    </div>
+
+    <!-- Controls & Legend Footer -->
+    <div class="mt-4 flex flex-wrap justify-between items-center gap-4 text-xs text-[var(--muted-foreground)] pt-3 border-t border-[var(--border)]">
+      <div class="flex items-center gap-4">
+        <span class="flex items-center gap-1.5">
+          <span class="w-2.5 h-2.5 rounded-sm bg-cyan-400"></span> Active Attention
+        </span>
+        <span class="flex items-center gap-1.5">
+          <span class="w-2.5 h-2.5 rounded-sm bg-red-400/50"></span> Masked / Blind (Causal)
+        </span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button onclick="autoPlay()" class="px-3 py-1.5 rounded-lg border border-[var(--border)] bg-[var(--card)] hover:bg-[var(--background)] transition-colors flex items-center gap-1.5 font-medium">
+          <span id="play-icon">▶</span> <span id="play-text">Animate Flow</span>
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let currentMode = 'bidi'; // 'causal' or 'bidi'
+    let selectedToken = '550';
+    let isPlaying = false;
+    let playInterval = null;
+
+    const contextTokensData = [
+      { id: 't0', text: 'Customer' },
+      { id: 't1', text: 'cannot' },
+      { id: 't2', text: 'login.' },
+      { id: 't3', text: 'Password' },
+      { id: 't4', text: 'reset' },
+      { id: 't5', text: 'email' },
+      { id: 't6', text: 'fails:' },
+      { id: '550', text: '550', highlight: true },
+      { id: 't8', text: 'Mailbox' },
+      { id: 't9', text: 'Unavailable' }
+    ];
+
+    const candidateTokensData = [
+      { id: 'c0', text: 'billing_support', type: 'candidate' },
+      { id: 'c1', text: 'email_infrastructure', type: 'candidate', target: true },
+      { id: 'c2', text: 'account_security', type: 'candidate' },
+      { id: 'c3', text: 'general_inquiry', type: 'candidate' }
+    ];
+
+    function renderTokens() {
+      const ctxContainer = document.getElementById('context-tokens');
+      ctxContainer.innerHTML = contextTokensData.map((t, idx) => `
+        <button id="${t.id}" onclick="selectToken('${t.id}')" 
+          class="px-2.5 py-1.5 rounded-lg text-xs font-mono transition-all duration-200 border ${
+            t.id === selectedToken 
+              ? 'bg-cyan-500 text-black font-bold border-cyan-400 shadow-md scale-105' 
+              : t.highlight 
+                ? 'bg-amber-500/10 text-amber-300 border-amber-500/30 font-semibold' 
+                : 'bg-[var(--card)] text-[var(--foreground)] border-[var(--border)] hover:border-cyan-500/50'
+          }">
+          ${t.text}
+        </button>
+      `).join('');
+
+      const candContainer = document.getElementById('candidate-tokens');
+      candContainer.innerHTML = candidateTokensData.map(c => `
+        <button id="${c.id}" onclick="selectToken('${c.id}')"
+          class="px-3.5 py-2 rounded-xl text-xs font-mono transition-all duration-200 border ${
+            c.id === selectedToken 
+              ? 'bg-cyan-500 text-black font-bold border-cyan-400 shadow-md scale-105' 
+              : c.target 
+                ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/40 font-semibold' 
+                : 'bg-[var(--card)] text-[var(--foreground)] border-[var(--border)] hover:border-cyan-500/50'
+          }">
+          ${c.text}
+        </button>
+      `).join('');
+    }
+
+    function drawAttentionArcs() {
+      const svg = document.getElementById('attention-svg');
+      svg.innerHTML = '';
+      const svgRect = svg.getBoundingClientRect();
+
+      const selectedEl = document.getElementById(selectedToken);
+      if (!selectedEl) return;
+      const selRect = selectedEl.getBoundingClientRect();
+      const x1 = selRect.left + selRect.width / 2 - svgRect.left;
+      const y1 = selRect.top + selRect.height / 2 - svgRect.top;
+
+      const isContextToken = contextTokensData.some(t => t.id === selectedToken);
+
+      if (currentMode === 'causal') {
+        if (isContextToken) {
+          // In Causal mode, early context tokens CANNOT look forward to candidate options!
+          // Draw a red barrier / warning
+          const barrier = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+          barrier.setAttribute('x1', x1);
+          barrier.setAttribute('y1', y1);
+          barrier.setAttribute('x2', x1);
+          barrier.setAttribute('y2', y1 + 80);
+          barrier.setAttribute('stroke', '#ef4444');
+          barrier.setAttribute('stroke-width', '2');
+          barrier.setAttribute('stroke-dasharray', '4,4');
+          svg.appendChild(barrier);
+
+          // Only attend backwards to previous context tokens
+          const selIdx = contextTokensData.findIndex(t => t.id === selectedToken);
+          for (let i = 0; i < selIdx; i++) {
+            const prevEl = document.getElementById(contextTokensData[i].id);
+            const pRect = prevEl.getBoundingClientRect();
+            const x2 = pRect.left + pRect.width / 2 - svgRect.left;
+            const y2 = pRect.top + pRect.height / 2 - svgRect.top;
+            drawCurve(svg, x1, y1, x2, y2, '#3b82f6', 1, false);
+          }
+        } else {
+          // A candidate token in Causal mode can attend backwards to context
+          contextTokensData.forEach(t => {
+            const el = document.getElementById(t.id);
+            const r = el.getBoundingClientRect();
+            drawCurve(svg, x1, y1, r.left + r.width / 2 - svgRect.left, r.top + r.height / 2 - svgRect.top, '#3b82f6', 0.8, false);
+          });
+        }
+      } else {
+        // BIDIRECTIONAL MODE: Full cross-attention web!
+        const targets = isContextToken ? candidateTokensData : contextTokensData;
+        targets.forEach(tgt => {
+          const el = document.getElementById(tgt.id);
+          const r = el.getBoundingClientRect();
+          const x2 = r.left + r.width / 2 - svgRect.left;
+          const y2 = r.top + r.height / 2 - svgRect.top;
+          const isKeyConnection = (selectedToken === '550' && tgt.id === 'c1') || (selectedToken === 'c1' && tgt.id === '550');
+          const color = isKeyConnection ? '#22d3ee' : '#38bdf8';
+          const width = isKeyConnection ? 3.5 : 1.2;
+          drawCurve(svg, x1, y1, x2, y2, color, isKeyConnection ? 1.0 : 0.4, isKeyConnection);
+        });
+      }
+    }
+
+    function drawCurve(svg, x1, y1, x2, y2, strokeColor, opacity, isPulsing) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      const midY = (y1 + y2) / 2;
+      const d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+      path.setAttribute('d', d);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('stroke', strokeColor);
+      path.setAttribute('stroke-width', isPulsing ? '2.5' : '1.5');
+      path.setAttribute('stroke-opacity', opacity);
+      if (isPulsing) path.classList.add('arc-glow');
+      svg.appendChild(path);
+    }
+
+    function selectToken(id) {
+      selectedToken = id;
+      renderTokens();
+      drawAttentionArcs();
+    }
+
+    function setMode(mode) {
+      currentMode = mode;
+      const btnCausal = document.getElementById('btn-causal');
+      const btnBidi = document.getElementById('btn-bidi');
+      const badge = document.getElementById('attention-direction-badge');
+      const title = document.getElementById('insight-title');
+      const desc = document.getElementById('insight-desc');
+      const icon = document.getElementById('status-icon');
+      const box = document.getElementById('insight-box');
+
+      if (mode === 'causal') {
+        btnCausal.className = "flex-1 sm:flex-initial px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-200 bg-red-500 text-white shadow-sm font-bold";
+        btnBidi.className = "flex-1 sm:flex-initial px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-200 text-[var(--muted-foreground)] hover:text-[var(--foreground)]";
+        badge.innerHTML = "→ Causal Mask: Early Tokens Blind to Future Criteria (Lower-Triangular Mask)";
+        badge.className = "absolute px-3 py-1 rounded-full text-xs font-mono font-medium border bg-[var(--card)] shadow-sm text-red-400 border-red-500/30";
+        title.innerText = "Causal Decoder Limitation";
+        title.className = "text-sm font-semibold text-red-400";
+        desc.innerHTML = "Because causal attention enforces $j \\le i$, the early error tokens (<code class='text-red-300 bg-red-950/40 px-1 py-0.5 rounded'>550 Mailbox</code>) <strong>cannot attend forward</strong> to the options. The model reads the entire document with blinders on, oblivious to the decision criteria.";
+        icon.innerText = "✕";
+        icon.className = "w-6 h-6 rounded-lg bg-red-500/20 text-red-400 flex items-center justify-center shrink-0 mt-0.5 font-bold";
+        box.className = "mb-6 p-4 rounded-xl border transition-all duration-300 bg-red-500/5 border-red-500/20";
+      } else {
+        btnBidi.className = "flex-1 sm:flex-initial px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-200 bg-cyan-500 text-black shadow-sm font-bold";
+        btnCausal.className = "flex-1 sm:flex-initial px-4 py-2 text-xs font-semibold rounded-lg transition-all duration-200 text-[var(--muted-foreground)] hover:text-[var(--foreground)]";
+        badge.innerHTML = "⇄ 28 Layers of Full Two-Way Cross-Attention (Dev-0.4B)";
+        badge.className = "absolute px-3 py-1 rounded-full text-xs font-mono font-medium border bg-[var(--card)] shadow-sm text-cyan-400 border-cyan-500/30";
+        title.innerText = "Bidirectional Cross-Attention (Dev-0.4B Advantage)";
+        title.className = "text-sm font-semibold text-cyan-400";
+        desc.innerHTML = "Every token in the unstructured log attends to all candidate choices across all 28 layers. The error code <code class='text-cyan-300 bg-cyan-950/40 px-1 py-0.5 rounded'>550 Mailbox</code> directly illuminates and connects to <code class='text-cyan-300 bg-cyan-950/40 px-1 py-0.5 rounded'>email_infrastructure</code> with zero blinders.";
+        icon.innerText = "✓";
+        icon.className = "w-6 h-6 rounded-lg bg-cyan-500/20 text-cyan-400 flex items-center justify-center shrink-0 mt-0.5 font-bold";
+        box.className = "mb-6 p-4 rounded-xl border transition-all duration-300 bg-cyan-500/5 border-cyan-500/20";
+      }
+      renderTokens();
+      drawAttentionArcs();
+    }
+
+    function autoPlay() {
+      if (isPlaying) {
+        clearInterval(playInterval);
+        isPlaying = false;
+        document.getElementById('play-text').innerText = "Animate Flow";
+        document.getElementById('play-icon').innerText = "▶";
+      } else {
+        isPlaying = true;
+        document.getElementById('play-text').innerText = "Pause";
+        document.getElementById('play-icon').innerText = "⏸";
+        let step = 0;
+        const sequence = ['550', 'c1', 't0', 't5'];
+        playInterval = setInterval(() => {
+          selectToken(sequence[step % sequence.length]);
+          step++;
+        }, 1500);
+      }
+    }
+
+    window.addEventListener('resize', drawAttentionArcs);
+    window.addEventListener('DOMContentLoaded', () => {
+      renderTokens();
+      setTimeout(drawAttentionArcs, 100);
+    });
+  </script>
+</body>
+</html>

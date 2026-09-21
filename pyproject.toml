@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dev"
+version = "0.1.0"
+description = "Open-source bidirectional decision model for unstructured developer input, built on ModernBERT"
+requires-python = ">=3.11"
+dependencies = [
+  "torch>=2.6,<3", "transformers>=4.48,<5", "numpy>=1.26",
+  "safetensors>=0.4", "mcp>=1.10,<2", "jsonschema>=4.20", "peft>=0.14,<1",
+  "huggingface-hub>=0.20"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+data = ["pyarrow>=18"]
+
+[project.scripts]
+dev-train = "dev.train:main"
+dev-proxy = "dev.proxy:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

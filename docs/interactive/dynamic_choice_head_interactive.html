@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dynamic Choice Head: Tensor Math & Live BMM Simulation</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    .cell-highlight {
+      animation: cell-pulse 1.5s infinite alternate;
+    }
+    @keyframes cell-pulse {
+      0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.4); }
+      100% { transform: scale(1.05); box-shadow: 0 0 12px 2px rgba(34, 211, 238, 0.7); }
+    }
+  </style>
+</head>
+<body class="bg-transparent text-[var(--foreground)] antialiased p-4">
+  <div class="bg-[var(--card)] text-[var(--foreground)] border border-[var(--border)] rounded-2xl p-6 shadow-xl max-w-4xl mx-auto backdrop-blur-md">
+    
+    <!-- Title & Cardinality Controls -->
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 pb-4 border-b border-[var(--border)]">
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            Interactive Matrix Simulation
+          </span>
+          <h2 class="text-xl font-bold tracking-tight">The Dynamic Choice Head (BMM)</h2>
+        </div>
+        <p class="text-sm text-[var(--muted-foreground)] mt-1">
+          Watch how fixed weights (<span class="font-mono text-cyan-400">d=2</span>) dynamically score any number of choices (<span class="font-mono text-emerald-400">K</span>) without token generation.
+        </p>
+      </div>
+
+      <!-- K Cardinality Switcher -->
+      <div class="flex items-center gap-1.5 bg-[var(--background)] p-1.5 rounded-xl border border-[var(--border)]">
+        <span class="text-xs text-[var(--muted-foreground)] px-2 font-medium">Choices (K):</span>
+        <button id="btn-k2" onclick="setK(2)" class="px-3 py-1.5 text-xs font-mono font-bold rounded-lg border border-transparent transition-all">K=2 (Noul)</button>
+        <button id="btn-k3" onclick="setK(3)" class="px-3 py-1.5 text-xs font-mono font-bold rounded-lg border border-transparent transition-all">K=3</button>
+        <button id="btn-k4" onclick="setK(4)" class="px-3 py-1.5 text-xs font-mono font-bold rounded-lg border border-transparent transition-all bg-emerald-500 text-black shadow-sm">K=4</button>
+        <button id="btn-k5" onclick="setK(5)" class="px-3 py-1.5 text-xs font-mono font-bold rounded-lg border border-transparent transition-all">K=5 (Score)</button>
+      </div>
+    </div>
+
+    <!-- Math Flow Diagram Container -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+      
+      <!-- Left Column: Context Query Vector (1 x 2) -->
+      <div class="lg:col-span-3 bg-[var(--background)] rounded-xl border border-[var(--border)] p-4 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-semibold uppercase tracking-wider text-cyan-400 font-mono">Query q'</span>
+            <span class="text-[10px] text-[var(--muted-foreground)] font-mono">[1 × 2]</span>
+          </div>
+          <p class="text-xs text-[var(--muted-foreground)] mb-3">Pooled representation of customer log & stack trace:</p>
+          <div class="bg-[var(--card)] p-3 rounded-lg border border-cyan-500/30 font-mono text-center">
+            <div class="text-xs text-[var(--muted-foreground)] mb-1">Context Vector</div>
+            <div class="text-sm font-bold text-cyan-300 tracking-wide">[ 1.20, -0.15 ]</div>
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-[var(--border)] text-[11px] text-[var(--muted-foreground)]">
+          Fixed dimension <span class="font-mono text-cyan-400">d_proj=2</span> derived from ModernBERT's 1024-dim hidden state.
+        </div>
+      </div>
+
+      <!-- Center Column: Dynamic Key Matrix K (K x 2) -->
+      <div class="lg:col-span-5 bg-[var(--background)] rounded-xl border border-[var(--border)] p-4 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-semibold uppercase tracking-wider text-emerald-400 font-mono">Candidate Keys K'</span>
+            <span id="k-dim-badge" class="text-[10px] text-[var(--muted-foreground)] font-mono">[4 × 2]</span>
+          </div>
+          <p class="text-xs text-[var(--muted-foreground)] mb-3">Dynamically pooled candidate choice spans:</p>
+          <div id="candidate-matrix-container" class="space-y-2 font-mono text-xs">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-[var(--border)] flex justify-between items-center text-[11px] text-[var(--muted-foreground)]">
+          <span>Row count dynamically adapts to prompt criteria!</span>
+          <button onclick="toggleHighlight()" class="text-cyan-400 hover:underline">Highlight Math</button>
+        </div>
+      </div>
+
+      <!-- Right Column: Resulting Logits & Softmax Output (1 x K) -->
+      <div class="lg:col-span-4 bg-[var(--background)] rounded-xl border border-[var(--border)] p-4 flex flex-col justify-between">
+        <div>
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-semibold uppercase tracking-wider text-amber-400 font-mono">Output Softmax</span>
+            <span id="out-dim-badge" class="text-[10px] text-[var(--muted-foreground)] font-mono">[1 × 4]</span>
+          </div>
+          <p class="text-xs text-[var(--muted-foreground)] mb-3">Live rebalanced probabilities & confidence:</p>
+          <div id="output-distribution-container" class="space-y-2.5 font-mono text-xs">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+        <div class="mt-4 pt-3 border-t border-[var(--border)] bg-cyan-500/5 p-2 rounded-lg border border-cyan-500/20">
+          <div class="text-[11px] font-semibold text-cyan-400 flex justify-between">
+            <span>Winning Choice:</span>
+            <span id="winning-choice-label">email_infrastructure</span>
+          </div>
+          <div class="text-[10px] text-[var(--muted-foreground)] mt-0.5">
+            Confidence: <span id="winning-conf-label" class="font-bold text-[var(--foreground)]">58.4%</span> (Calibrated)
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Formula Walkthrough Box -->
+    <div class="mt-5 p-4 rounded-xl border border-[var(--border)] bg-[var(--background)] text-xs font-mono">
+      <div class="text-[var(--muted-foreground)] mb-1 flex items-center justify-between">
+        <span class="text-xs font-bold text-[var(--foreground)]">Batch Matrix Multiplication (torch.bmm):</span>
+        <span class="text-cyan-400">s_k = (q' · k_k') / √2</span>
+      </div>
+      <div id="live-calculation-text" class="text-emerald-400 break-all leading-relaxed">
+        <!-- Live computation text -->
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    let currentK = 4;
+    let isHighlighted = false;
+
+    const allCandidates = [
+      { id: 0, label: "billing_support", vec: [0.10, 0.40], desc: "Billing inquiry" },
+      { id: 1, label: "email_infrastructure", vec: [1.40, -0.10], desc: "SMTP / 550 error" },
+      { id: 2, label: "account_security", vec: [0.30, 0.80], desc: "Auth / Password" },
+      { id: 3, label: "general_inquiry", vec: [0.00, 0.20], desc: "Catch-all support" },
+      { id: 4, label: "feature_request", vec: [0.50, -0.60], desc: "Product suggestion" }
+    ];
+
+    const qVec = [1.20, -0.15];
+    const scaleFactor = Math.sqrt(2); // sqrt(d_proj)
+
+    function computeSimulation(k) {
+      const active = allCandidates.slice(0, k);
+      const dots = active.map(c => (qVec[0] * c.vec[0] + qVec[1] * c.vec[1]));
+      const scaledLogits = dots.map(d => d / scaleFactor);
+      
+      // Compute softmax
+      const maxLogit = Math.max(...scaledLogits);
+      const exps = scaledLogits.map(s => Math.exp(s - maxLogit));
+      const sumExps = exps.reduce((a, b) => a + b, 0);
+      const probs = exps.map(e => e / sumExps);
+
+      return { active, dots, scaledLogits, probs };
+    }
+
+    function renderSimulation() {
+      const { active, dots, scaledLogits, probs } = computeSimulation(currentK);
+
+      // Update badges
+      document.getElementById('k-dim-badge').innerText = `[${currentK} × 2]`;
+      document.getElementById('out-dim-badge').innerText = `[1 × ${currentK}]`;
+
+      // Render Candidate Matrix
+      const matrixContainer = document.getElementById('candidate-matrix-container');
+      matrixContainer.innerHTML = active.map((c, i) => `
+        <div class="flex items-center justify-between p-2 rounded-lg border ${
+          i === 1 ? 'border-cyan-500/50 bg-cyan-500/10' : 'border-[var(--border)] bg-[var(--card)]'
+        } ${isHighlighted && i === 1 ? 'cell-highlight' : ''}">
+          <div class="flex items-center gap-2">
+            <span class="w-4 h-4 rounded bg-[var(--background)] flex items-center justify-center text-[10px] text-[var(--muted-foreground)]">${i}</span>
+            <span class="font-medium text-xs ${i === 1 ? 'text-cyan-300 font-bold' : ''}">${c.label}</span>
+          </div>
+          <span class="text-xs text-emerald-400 font-mono">[${c.vec[0].toFixed(2)}, ${c.vec[1].toFixed(2)}]</span>
+        </div>
+      `).join('');
+
+      // Render Softmax Output
+      const outContainer = document.getElementById('output-distribution-container');
+      const maxIdx = probs.indexOf(Math.max(...probs));
+      
+      outContainer.innerHTML = active.map((c, i) => {
+        const pct = (probs[i] * 100).toFixed(1);
+        const isWinner = i === maxIdx;
+        return `
+          <div>
+            <div class="flex justify-between items-center text-xs mb-1">
+              <span class="${isWinner ? 'text-cyan-300 font-bold' : 'text-[var(--muted-foreground)]'}">${c.label}</span>
+              <span class="font-mono ${isWinner ? 'text-cyan-300 font-bold' : ''}">${pct}%</span>
+            </div>
+            <div class="w-full bg-[var(--card)] h-2 rounded-full overflow-hidden border border-[var(--border)]">
+              <div class="h-full rounded-full transition-all duration-500 ${isWinner ? 'bg-cyan-400 shadow-sm' : 'bg-[var(--muted-foreground)]/30'}" style="width: ${pct}%"></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Update Winner
+      document.getElementById('winning-choice-label').innerText = active[maxIdx].label;
+      document.getElementById('winning-conf-label').innerText = `${(probs[maxIdx] * 100).toFixed(1)}%`;
+
+      // Update Live Formula Text
+      const calcLines = active.map((c, i) => {
+        const dot = dots[i].toFixed(3);
+        const scaled = scaledLogits[i].toFixed(3);
+        const p = (probs[i] * 100).toFixed(1);
+        return `Option ${i} (${c.label}): dot = (1.20×${c.vec[0]}) + (-0.15×${c.vec[1]}) = ${dot} → logit = ${scaled} → p = ${p}%`;
+      }).join('<br/>');
+
+      document.getElementById('live-calculation-text').innerHTML = calcLines;
+
+      // Update Buttons
+      [2, 3, 4, 5].forEach(k => {
+        const btn = document.getElementById(`btn-k${k}`);
+        if (k === currentK) {
+          btn.className = "px-3 py-1.5 text-xs font-mono font-bold rounded-lg border border-transparent transition-all bg-emerald-500 text-black shadow-sm";
+        } else {
+          btn.className = "px-3 py-1.5 text-xs font-mono font-bold rounded-lg border border-transparent transition-all text-[var(--muted-foreground)] hover:text-[var(--foreground)]";
+        }
+      });
+    }
+
+    function setK(k) {
+      currentK = k;
+      renderSimulation();
+    }
+
+    function toggleHighlight() {
+      isHighlighted = !isHighlighted;
+      renderSimulation();
+    }
+
+    window.addEventListener('DOMContentLoaded', renderSimulation);
+  </script>
+</body>
+</html>
